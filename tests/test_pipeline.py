@@ -51,3 +51,11 @@ def test_write_dataset_roundtrip(tmp_path):
     assert rows[0]["Activity Type"] == "Run"           # sport, title-cased
     assert rows[0]["Distance"] == "10.123"             # rounded to 3 dp
     assert rows[0]["Source"] == "garmin"
+
+
+def test_garmin_start_uses_local_wall_clock():
+    from pipeline.sources.garmin import _parse_start
+    raw = {"startTimeLocal": "2026-10-15 05:30:00", "startTimeGMT": "2026-10-14 20:30:00"}
+    dt = _parse_start(raw)
+    assert dt.strftime("%Y-%m-%d %H:%M") == "2026-10-15 05:30"   # not the UTC 14th
+    assert _parse_start({"startTimeGMT": "2026-10-14 20:30:00"}).day == 14  # fallback

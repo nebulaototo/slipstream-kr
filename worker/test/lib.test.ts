@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   parseCsv, summarize, filterActs, toSummary, bucketKey, fmtDuration,
+  parseHealthCsv, filterHealth, healthAverages,
 } from "../src/lib";
 
 const CSV = [
@@ -22,6 +23,31 @@ describe("parseCsv", () => {
   });
   it("returns nothing for header-only input", () =>
     expect(parseCsv("a,b,c")).toHaveLength(0));
+});
+
+describe("parseCsv detail columns", () => {
+  const CSV2 = [
+    "Activity ID,Activity Date,Activity Name,Activity Type,Raw Sport,Distance,Filename,Moving Time,Elapsed Time,Max Heart Rate,Average Heart Rate,Elevation Gain,Average Speed,Average Watts,Calories,Source,Average Cadence,Max Cadence,Stride Length,Max Speed,Aerobic TE,Anaerobic TE,VO2max,Detail File",
+    "garmin-9,2026-10-14 06:00:00,Run,Run,running,5.007,,2048,2100,150,127,28,2.44,,420,garmin,168.5,182,0.87,3.1,2.9,0.3,49,details/garmin-9.json",
+  ].join("\n");
+  const a = parseCsv(CSV2)[0];
+  it("reads cadence/stride/TE/VO2max", () => {
+    expect(a.avgCadence).toBe(168.5);
+    expect(a.strideM).toBe(0.87);
+    expect(a.aerobicTe).toBe(2.9);
+    expect(a.vo2max).toBe(49);
+    expect(a.detailFile).toBe("details/garmin-9.json");
+  });
+  it("summary exposes cadence and has_detail", () => {
+    const s = toSummary(a);
+    expect(s.avg_cadence).toBe(168.5);
+    expect(s.has_detail).toBe(true);
+  });
+  it("old CSV without the columns still parses", () => {
+    const old = parseCsv(CSV)[0];
+    expect(old.avgCadence).toBeUndefined();
+    expect(toSummary(old).has_detail).toBe(false);
+  });
 });
 
 describe("summarize", () => {
@@ -63,4 +89,28 @@ describe("fmtDuration", () => {
     expect(fmtDuration(125)).toBe("2:05");
     expect(fmtDuration(undefined)).toBeUndefined();
   });
+});
+
+describe("daily health", () => {
+  const H = [
+    "Date,Sleep Score,Sleep Quality,Sleep Hours,Deep Min,Light Min,REM Min,Awake Min,Nap Min,Bedtime,Wake Time,Sleep Avg SpO2,Sleep Avg Respiration,Resting HR,HRV Last Night,HRV Weekly Avg,HRV Status,Body Battery High,Body Battery Low,Body Battery Change,Avg Stress,Max Stress,Steps,Training Readiness,Readiness Level,Readiness Note",
+    "2026-10-14,75,FAIR,6.5,70,250,70,20,,23:10,05:40,96,14.1,52,45,46,BALANCED,88,20,52,30,90,9800,58,MODERATE,MODERATE_READY",
+    "2026-10-15,81,GOOD,7,90,240,90,15,,22:00,05:00,96,14.2,51,48,46,BALANCED,92,23,58,27,88,10432,64,MODERATE,MODERATE_READY",
+  ].join("\n");
+  const days = parseHealthCsv(H);
+  it("parses and sorts newest first", () => {
+    expect(days).toHaveLength(2);
+    expect(days[0].date).toBe("2026-10-15");
+    expect(days[0].sleep_hours).toBe(7);
+    expect(days[0].bedtime).toBe("22:00");
+    expect(days[0].hrv_status).toBe("BALANCED");
+  });
+  it("filters by date and averages", () => {
+    expect(filterHealth(days, { start_date: "2026-10-15" })).toHaveLength(1);
+    const a = healthAverages(days);
+    expect(a.avg_sleep_hours).toBe(6.75);
+    expect(a.avg_resting_hr).toBe(51.5);
+    expect(a.avg_training_readiness).toBe(61);
+  });
+  it("returns nothing for header-only", () => expect(parseHealthCsv("Date,Sleep Score")).toHaveLength(0));
 });

@@ -19,31 +19,67 @@ import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
-  Activity, parseCsv, filterActs, summarize, toSummary, bucketKey,
+  Activity, parseCsv, filterActs, summarize, toSummary, toFull, bucketKey,
+  HealthDay, parseHealthCsv, filterHealth, healthAverages,
 } from "./lib";
 
 const CSV_PATH = "data/activities.csv";
+const HEALTH_CSV_PATH = "data/health/daily.csv";
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const DETAIL_CACHE_MAX = 50;
 
 export class FitnessMCP extends McpAgent<Env> {
   server = new McpServer({ name: "slipstream-fitness", version: "1.0.0" });
   private cache?: { at: number; data: Activity[] };
+  private detailCache = new Map<string, unknown>();
+  private healthCache?: { at: number; data: HealthDay[] };
 
-  async getActivities(): Promise<Activity[]> {
-    if (this.cache && Date.now() - this.cache.at < CACHE_TTL_MS) return this.cache.data;
-    const res = await fetch(
-      `https://api.github.com/repos/${this.env.DATA_REPO}/contents/${CSV_PATH}?ref=main`,
+  private async readRepoFile(path: string): Promise<Response> {
+    return fetch(
+      `https://api.github.com/repos/${this.env.DATA_REPO}/contents/${path}?ref=main`,
       { headers: {
         Authorization: `Bearer ${this.env.GITHUB_TOKEN}`,
         Accept: "application/vnd.github.raw",
         "User-Agent": "slipstream-mcp",
       } },
     );
+  }
+
+  async getActivities(): Promise<Activity[]> {
+    if (this.cache && Date.now() - this.cache.at < CACHE_TTL_MS) return this.cache.data;
+    const res = await this.readRepoFile(CSV_PATH);
     if (res.status === 404) return []; // no data yet - first fetch hasn't run
     if (!res.ok) throw new Error(`Could not read fitness data (GitHub ${res.status}).`);
     const data = parseCsv(await res.text());
     this.cache = { at: Date.now(), data };
     return data;
+  }
+
+  async getHealth(): Promise<HealthDay[]> {
+    if (this.healthCache && Date.now() - this.healthCache.at < CACHE_TTL_MS) return this.healthCache.data;
+    const res = await this.readRepoFile(HEALTH_CSV_PATH);
+    if (res.status === 404) return []; // health not enabled / first refresh not run
+    if (!res.ok) throw new Error(`Could not read health data (GitHub ${res.status}).`);
+    const data = parseHealthCsv(await res.text());
+    this.healthCache = { at: Date.now(), data };
+    return data;
+  }
+
+  /** Per-activity detail JSON (laps, HR zones, running dynamics), written by the pipeline. */
+  async getDetail(a: Activity): Promise<unknown | null> {
+    if (!a.detailFile) return null;
+    const hit = this.detailCache.get(a.id);
+    if (hit) return hit;
+    const res = await this.readRepoFile(`data/${a.detailFile}`);
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`Could not read activity detail (GitHub ${res.status}).`);
+    const detail = await res.json();
+    if (this.detailCache.size >= DETAIL_CACHE_MAX) {
+      const oldest = this.detailCache.keys().next().value;
+      if (oldest !== undefined) this.detailCache.delete(oldest);
+    }
+    this.detailCache.set(a.id, detail);
+    return detail;
   }
 
   private text(obj: unknown) {
@@ -127,6 +163,68 @@ export class FitnessMCP extends McpAgent<Env> {
         most_elevation_gain: best((a) => a.elevGain),
         fastest_avg_pace: best((a) => (a.distanceKm && a.movingS ? a.movingS / a.distanceKm : undefined), false),
       });
+    });
+
+    this.server.registerTool("get_activity_detail", {
+      description: "Full detail for one activity: laps/splits (per-lap pace, HR, cadence, stride), "
+        + "heart-rate zone time, running dynamics, training effect, VO2max. "
+        + "Pass the id from list_activities (e.g. \"garmin-24719487041\"), or omit it for the latest activity.",
+      inputSchema: {
+        activity_id: z.string().optional().describe('id from list_activities, e.g. "garmin-123"'),
+        sport_type: sport,
+      },
+    }, async (args) => {
+      const all = await this.getActivities();
+      let a: Activity | undefined;
+      if (args.activity_id) {
+        const want = args.activity_id.toLowerCase();
+        a = all.find((x) => x.id.toLowerCase() === want || x.id.toLowerCase() === `garmin-${want}`);
+        if (!a) return this.text({ error: `No activity with id "${args.activity_id}". Use list_activities to find ids.` });
+      } else {
+        const rows = [...filterActs(all, { sport_type: args.sport_type })]
+          .sort((x, y) => (y.date?.getTime() ?? 0) - (x.date?.getTime() ?? 0));
+        a = rows[0];
+        if (!a) return this.text({ error: "No activities found." });
+      }
+      const detail = await this.getDetail(a);
+      return this.text({
+        activity: toFull(a),
+        detail: detail ?? { note: "No lap/zone detail stored for this activity yet. "
+          + "Details are pulled on the next data refresh for every activity inside the refresh window (DAYS_BACK)." },
+      });
+    });
+
+    this.server.registerTool("daily_health", {
+      description: "Daily wellness log from the watch, newest first: sleep score/hours/stages, bedtime, "
+        + "resting HR, HRV, body battery, stress, steps, training readiness. Returns the rows plus averages "
+        + "over the range. Use for questions about sleep, recovery, HRV or readiness trends.",
+      inputSchema: {
+        start_date: dateRange, end_date: dateRange,
+        limit: z.number().int().min(1).max(120).default(14),
+      },
+    }, async (args) => {
+      const all = await this.getHealth();
+      if (!all.length) return this.text({ days: 0, note: "No daily health data yet - it is pulled on the next data refresh." });
+      const rows = filterHealth(all, args);
+      return this.text({
+        matched: rows.length, showing: Math.min(args.limit, rows.length),
+        averages: healthAverages(rows),
+        days: rows.slice(0, args.limit),
+      });
+    });
+
+    this.server.registerTool("sleep_detail", {
+      description: "Everything recorded for one night/day: sleep stages and score breakdown, SpO2, respiration, "
+        + "HRV with baseline and status, body battery, stress breakdown, training-readiness factors. "
+        + "date is YYYY-MM-DD (the morning you woke up); omit for the latest day.",
+      inputSchema: { date: dateRange },
+    }, async (args) => {
+      const all = await this.getHealth();
+      const day = args.date ? all.find((d) => d.date === args.date) : all[0];
+      if (!day) return this.text({ error: args.date ? `No health data for ${args.date}.` : "No health data yet." });
+      const res = await this.readRepoFile(`data/health/${day.date}.json`);
+      if (!res.ok) return this.text({ summary: day, note: "Detail file not available; summary only." });
+      return this.text(await res.json());
     });
 
     this.server.registerTool("list_sport_types", {

@@ -1,5 +1,8 @@
 # 🏃 Slipstream
 
+> 🇰🇷 한국어 안내 / Korean guide: **[README_KR.md](README_KR.md)**  
+> This fork adds laps, cadence, HR zones, sleep/HRV/readiness, local dates and a 90-day window. Upstream: [yhecht/slipstream](https://github.com/yhecht/slipstream).
+
 [![CI](https://github.com/yhecht/slipstream/actions/workflows/ci.yml/badge.svg)](https://github.com/yhecht/slipstream/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 

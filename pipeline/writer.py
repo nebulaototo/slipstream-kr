@@ -12,6 +12,10 @@ _HEADERS = [
     "Distance", "Filename", "Moving Time", "Elapsed Time", "Max Heart Rate",
     "Average Heart Rate", "Elevation Gain", "Average Speed", "Average Watts",
     "Calories", "Source",
+    # Added for lap/cadence support (worker reads these by header name, so
+    # order is free; older CSVs without them still parse).
+    "Average Cadence", "Max Cadence", "Stride Length", "Max Speed",
+    "Aerobic TE", "Anaerobic TE", "VO2max", "Detail File",
 ]
 
 
@@ -46,6 +50,14 @@ def _row(a: Activity) -> list:
         _num(a.avg_watts, 1),
         _num(a.calories, 0),
         a.source,
+        _num(a.avg_cadence, 1),
+        _num(a.max_cadence, 1),
+        _num(a.stride_length_m, 3),
+        _num(a.max_speed_ms, 3),
+        _num(a.aerobic_te, 1),
+        _num(a.anaerobic_te, 1),
+        _num(a.vo2max, 1),
+        a.detail_file or "",
     ]
 
 
@@ -53,6 +65,7 @@ def write_dataset(activities: list[Activity], data_dir: str) -> dict:
     data = Path(data_dir)
     data.mkdir(parents=True, exist_ok=True)
     (data / "tracks").mkdir(exist_ok=True)
+    (data / "details").mkdir(exist_ok=True)
 
     activities = sorted(
         [a for a in activities if a.start is not None], key=lambda a: a.start, reverse=True

@@ -35,6 +35,8 @@ def canonical_sport(raw_type: str | None) -> str:
 
 
 def to_utc(dt: datetime | None) -> datetime | None:
+    """Tag a naive datetime as UTC without shifting it (used to carry local
+    wall-clock times through unchanged); shift aware datetimes to UTC."""
     if dt is None:
         return None
     return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
@@ -57,6 +59,18 @@ class Activity:
     avg_watts: float | None = None
     calories: float | None = None
     track_file: str | None = None
+    # Summary-level running/cycling dynamics (Garmin provides these on the list
+    # endpoint, so they cost no extra API calls).
+    avg_cadence: float | None = None       # steps/min (run) or rpm (ride)
+    max_cadence: float | None = None
+    stride_length_m: float | None = None
+    max_speed_ms: float | None = None
+    aerobic_te: float | None = None        # Garmin Training Effect 0-5
+    anaerobic_te: float | None = None
+    vo2max: float | None = None
+    # Relative path (under data/) of the per-activity detail JSON: laps,
+    # HR zones, running dynamics. Written by the source adapter.
+    detail_file: str | None = None
 
     def __post_init__(self):
         self.start = to_utc(self.start)

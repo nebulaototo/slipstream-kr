@@ -47,8 +47,13 @@ ChatGPT speak). It's built on the `agents` MCP runtime and the official MCP SDK.
 - On a tool call it fetches `data/activities.csv` from your private repo using a
   **read-only, single-repo token** (`GITHUB_TOKEN`), caches it briefly, and
   answers in-memory.
-- It exposes six read-only tools: `data_status`, `list_activities`,
-  `activity_stats`, `personal_bests`, `list_sport_types`, `search_activities`.
+- It exposes nine read-only tools: `data_status`, `list_activities`,
+  `activity_stats`, `personal_bests`, `list_sport_types`, `search_activities`,
+  and `get_activity_detail` (laps/splits, HR zones, running dynamics, training
+  effect - read from `data/details/<id>.json`, which the pipeline writes once
+  per activity), plus `daily_health` and `sleep_detail` (sleep, resting HR,
+  HRV, body battery, stress, training readiness - from `data/health/daily.csv`
+  and `data/health/<date>.json`, one row/file per calendar day).
 - It serves **only** at `/<MCP_SECRET>/mcp` (and `/sse`). Every other path is a
   404, so the data isn't discoverable without the full secret URL.
 - It deliberately exposes **summary data only** - no GPS coordinates leave the

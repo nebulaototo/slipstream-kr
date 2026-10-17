@@ -18,7 +18,7 @@ jobs:
   refresh:
     runs-on: ubuntu-latest
     env:
-      DAYS_BACK: "30"
+      DAYS_BACK: "90"
       GARMINTOKENS: ${{ secrets.GARMINTOKENS }}
     steps:
       - uses: actions/checkout@v4

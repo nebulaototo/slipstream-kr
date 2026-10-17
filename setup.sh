@@ -15,9 +15,16 @@ step() { printf "\n${BOLD}${CYAN}==> %s${RESET}\n" "$*"; }
 ok()   { printf "${GREEN}✓${RESET} %s\n" "$*"; }
 warn() { printf "${YELLOW}!${RESET} %s\n" "$*"; }
 die()  { printf "\n${RED}✗ %s${RESET}\n" "$*" >&2; exit 1; }
+IS_WSL=0; grep -qi microsoft /proc/version 2>/dev/null && IS_WSL=1
 open_url() {
+  [ "$IS_WSL" = "1" ] && command -v cmd.exe >/dev/null 2>&1 && { cmd.exe /c start "" "$1" >/dev/null 2>&1 || true; return; }
   command -v open    >/dev/null 2>&1 && { open "$1"    >/dev/null 2>&1 || true; return; }
   command -v xdg-open >/dev/null 2>&1 && { xdg-open "$1" >/dev/null 2>&1 || true; return; }
+}
+copy_clip() {  # best effort; returns 0 only if something was copied
+  if command -v pbcopy >/dev/null 2>&1; then printf "%s" "$1" | pbcopy
+  elif command -v clip.exe >/dev/null 2>&1; then printf "%s" "$1" | clip.exe
+  else return 1; fi
 }
 
 cd "$(dirname "$0")"
@@ -40,13 +47,24 @@ say "account, and Claude and/or ChatGPT. I'll open browser pages when needed.${R
 step "1/6  Checking prerequisites"
 miss=0
 check() { command -v "$1" >/dev/null 2>&1 || { warn "Missing '$1' - install with: ${BOLD}$2${RESET}"; miss=1; }; }
-check python3 "brew install python    (or python.org)"
-check git     "brew install git"
-check curl    "brew install curl"
-check node    "brew install node      (or nodejs.org)"
-check npm     "brew install node"
-check openssl "brew install openssl"
-check gh      "brew install gh        (GitHub CLI: cli.github.com)"
+if command -v apt-get >/dev/null 2>&1; then   # Debian / Ubuntu / WSL
+  check python3 "sudo apt install -y python3 python3-venv python3-pip"
+  check git     "sudo apt install -y git"
+  check curl    "sudo apt install -y curl"
+  check node    "curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs"
+  check npm     "(installed together with node, see above)"
+  check openssl "sudo apt install -y openssl"
+  check gh      "sudo apt install -y gh   (or see cli.github.com)"
+  python3 -c "import ensurepip" >/dev/null 2>&1 || { warn "Missing 'python3-venv' - install with: ${BOLD}sudo apt install -y python3-venv${RESET}"; miss=1; }
+else
+  check python3 "brew install python    (or python.org)"
+  check git     "brew install git"
+  check curl    "brew install curl"
+  check node    "brew install node      (or nodejs.org)"
+  check npm     "brew install node"
+  check openssl "brew install openssl"
+  check gh      "brew install gh        (GitHub CLI: cli.github.com)"
+fi
 [ "$miss" = "0" ] || die "Install the tool(s) above, then run ./setup.sh again."
 gh auth status >/dev/null 2>&1 || { warn "Let's log in to GitHub first…"; gh auth login; }
 GH_USER="$(gh api user --jq .login)"
@@ -90,7 +108,7 @@ gh workflow run refresh.yml -R "$REPO" >/dev/null 2>&1 \
 # --------------------------------------------------------------------------
 step "5/6  Cloudflare (free host - where your connector lives)"
 ( cd worker && npm install --silent )
-if ( cd worker && npx wrangler whoami >/dev/null 2>&1 ); then
+if [ -n "${CLOUDFLARE_API_TOKEN:-}" ] || ( cd worker && npx wrangler whoami 2>/dev/null | grep -qi "You are logged in" ); then
   ok "Already signed in to Cloudflare."
 else
   read -r -p "Do you already have a Cloudflare account? [y/N] " HAVE_CF || HAVE_CF=""
@@ -138,9 +156,15 @@ if [ -f "$SECRET_FILE" ]; then MCP_SECRET="$(cat "$SECRET_FILE")"; else MCP_SECR
   printf "%s" "$(gh auth token)" | npx wrangler secret put GITHUB_TOKEN >/dev/null
   printf "%s" "$MCP_SECRET"     | npx wrangler secret put MCP_SECRET  >/dev/null
   npx wrangler types >/dev/null 2>&1 || true
-  npx wrangler deploy
+  npx wrangler deploy 2>&1 | tee ../.deploy.log
+  test "${PIPESTATUS[0]}" = "0"
 )
 ok "Worker deployed."
+if [ -z "$SUB" ]; then
+  SUB="$(grep -oE 'https://slipstream-mcp\.[A-Za-z0-9-]+\.workers\.dev' .deploy.log | head -1 | sed -E 's#https://slipstream-mcp\.([^.]+)\.workers\.dev#\1#')"
+  [ -n "$SUB" ] && ok "Your web address: ${SUB}.workers.dev"
+fi
+rm -f .deploy.log
 
 # --------------------------------------------------------------------------
 step "6/6  Connect it to Claude / ChatGPT"
@@ -156,7 +180,7 @@ fi
 
 # Save the URL next to the repo (gitignored), copy it, and open the Claude page.
 [ -n "$SUB" ] && printf "%s" "$CONNECTOR_URL" > .connector_url
-command -v pbcopy >/dev/null 2>&1 && printf "%s" "$CONNECTOR_URL" | pbcopy && COPIED=" (copied to your clipboard)" || COPIED=""
+copy_clip "$CONNECTOR_URL" && COPIED=" (copied to your clipboard)" || COPIED=""
 open_url "https://claude.ai/settings/connectors"
 
 cat <<EOF

@@ -20,6 +20,7 @@ garmin_tokens*.txt
 
 # Local scratch
 *.local
+.deploy.log
 
 # NOTE: data/ is intentionally NOT ignored - the scheduled Action commits your
 # activity summaries there so the connector can read them. (Your data lives in
