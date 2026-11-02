@@ -4,7 +4,7 @@ name: Refresh fitness data
 # trigger is what a phone shortcut can fire). Commits the result to data/.
 on:
   schedule:
-    - cron: "0 */6 * * *"      # every 6 hours
+    - cron: "23 1,12 * * *"   # KST 10:23, 21:23
   workflow_dispatch: {}
 
 permissions:

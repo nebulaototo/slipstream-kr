@@ -59,7 +59,7 @@ gh repo create slipstream --template <이-저장소-주소> --private --clone &&
 
 ## 쓰는 법
 
-- 데이터는 **6시간마다 자동** 갱신됩니다.
+- 데이터는 **하루 2번(오전 10시·밤 9시경) 자동** 갱신됩니다.
 - 러닝 직후 바로 보고 싶으면: 가민 앱 동기화 → **GitHub 앱** → 내 `slipstream` 저장소 → Actions → *Refresh fitness data* → **워크플로 실행**. 1~2분 뒤 반영.
   (터미널이면 `cd ~/slipstream && gh workflow run refresh.yml`)
 - 물어볼 수 있는 것 예시:
